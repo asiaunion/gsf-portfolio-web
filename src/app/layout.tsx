@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { Inter, Noto_Sans_KR } from 'next/font/google';
 import './globals.css';
 import BottomNav from '@/components/BottomNav';
+import { cookies } from 'next/headers';
 
 const inter = Inter({
   subsets: ['latin'],
@@ -37,18 +38,21 @@ export const metadata: Metadata = {
   },
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  const cookieStore = await cookies();
+  const isAuthenticated = cookieStore.has('auth_session');
+
   return (
     <html lang="ko" className={`${inter.variable} ${notoSansKr.variable}`}>
       <body>
         <div className="app-container">
           {children}
         </div>
-        <BottomNav />
+        {isAuthenticated && <BottomNav />}
       </body>
     </html>
   );
