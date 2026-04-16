@@ -96,15 +96,16 @@ export async function fetchAssetData(): Promise<{ assets: Asset[], isDelayed: bo
       const res = await sheets.spreadsheets.values.get({
         spreadsheetId: sheetId,
         range: 'A:H',
+        valueRenderOption: 'UNFORMATTED_VALUE', // Fetch raw numbers instead of currency formatted strings
       });
       
       const rows = res.data.values;
       if (rows && rows.length > 1) {
-        const headers = rows[0];
+        const headers = rows[0].map(String);
         const data = rows.slice(1).map(row => {
           const obj: any = {};
           headers.forEach((h: string, i: number) => {
-            obj[h] = row[i] || '';
+            obj[h] = row[i] != null ? String(row[i]) : '';
           });
           return obj as RowData;
         });
@@ -161,9 +162,13 @@ export async function fetchAssetData(): Promise<{ assets: Asset[], isDelayed: bo
     const broker = (row.증권사 || '-').trim();
     const name = (row.종목명 || '알 수 없음').trim();
     const ticker = (row.종목코드 || '').trim();
-    const quantity = parseFloat((row.수량 || '1').replace(/,/g, ''));
-    const buyPrice = parseFloat((row.매입단가 || '0').replace(/,/g, ''));
-    const evalPrice = parseFloat((row.평가금액 || '0').replace(/,/g, ''));
+    
+    // 강제 숫자 변환: 숫자, 점(.), 바이너리 마이너스 기호 이외의 문자를 전부 제거 (예: ₩, 공백 등)
+    const cleanNum = (str: string) => str.replace(/[^0-9.-]/g, '');
+    
+    const quantity = parseFloat(cleanNum(row.수량 || '1'));
+    const buyPrice = parseFloat(cleanNum(row.매입단가 || '0'));
+    const evalPrice = parseFloat(cleanNum(row.평가금액 || '0'));
 
     if (isNaN(quantity)) errors.push(`구글 시트 ${idx + 2}행: '수량' 값을 숫자로 변환할 수 없음 (${row.수량}).`);
     if (isNaN(buyPrice)) errors.push(`구글 시트 ${idx + 2}행: '매입단가' 값을 숫자로 변환할 수 없음 (${row.매입단가}).`);
