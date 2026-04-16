@@ -1,4 +1,5 @@
 import Papa from 'papaparse';
+import { google } from 'googleapis';
 
 export interface RowData {
   분류: string;
@@ -78,7 +79,44 @@ export async function fetchAssetData(): Promise<{ assets: Asset[], isDelayed: bo
   let isDelayed = false;
   const errors: string[] = [];
   
-  if (process.env.GSHEETS_CSV_URL) {
+  let parseResult: { data: RowData[], errors: any[] } = { data: [], errors: [] };
+
+  const clientEmail = process.env.GCP_CLIENT_EMAIL;
+  const privateKey = process.env.GCP_PRIVATE_KEY?.replace(/\\n/g, '\n');
+  const sheetId = process.env.GSHEETS_ID || process.env.GSHEETS_CSV_URL?.match(/\/d\/([a-zA-Z0-9-_]+)/)?.[1];
+
+  if (clientEmail && privateKey && sheetId) {
+    try {
+      const auth = new google.auth.JWT({
+        email: clientEmail,
+        key: privateKey,
+        scopes: ['https://www.googleapis.com/auth/spreadsheets.readonly']
+      });
+      const sheets = google.sheets({ version: 'v4', auth });
+      const res = await sheets.spreadsheets.values.get({
+        spreadsheetId: sheetId,
+        range: 'A:H',
+      });
+      
+      const rows = res.data.values;
+      if (rows && rows.length > 1) {
+        const headers = rows[0];
+        const data = rows.slice(1).map(row => {
+          const obj: any = {};
+          headers.forEach((h: string, i: number) => {
+            obj[h] = row[i] || '';
+          });
+          return obj as RowData;
+        });
+        parseResult.data = data;
+      }
+    } catch (e: any) {
+      isDelayed = true;
+      errors.push(`Google API Read Error: ${e.message}`);
+    }
+  } 
+  
+  if (parseResult.data.length === 0 && process.env.GSHEETS_CSV_URL) {
     let url = process.env.GSHEETS_CSV_URL;
     if (url.includes('docs.google.com/spreadsheets') && url.includes('/edit')) {
       url = url.replace(/\/edit\??.*/, '/export?format=csv');
@@ -88,6 +126,7 @@ export async function fetchAssetData(): Promise<{ assets: Asset[], isDelayed: bo
       const res = await fetch(url, { next: { revalidate: 60 } });
       if (res.ok) {
         csvText = await res.text();
+        parseResult = Papa.parse<RowData>(csvText, { header: true, skipEmptyLines: true });
       } else {
         isDelayed = true;
       }
@@ -96,11 +135,13 @@ export async function fetchAssetData(): Promise<{ assets: Asset[], isDelayed: bo
     }
   }
 
-  const parseResult = Papa.parse<RowData>(csvText, { header: true, skipEmptyLines: true });
-  
+  if (parseResult.data.length === 0 && !isDelayed) {
+      parseResult = Papa.parse<RowData>(csvText, { header: true, skipEmptyLines: true });
+  }
+
   if (parseResult.errors.length > 0) {
     parseResult.errors.forEach(e => {
-        errors.push(`CSV 파싱 오류 (행 ${e.row}): ${e.message}`);
+        errors.push(`CSV 파싱 오류: ${e.message}`);
     });
   }
 
